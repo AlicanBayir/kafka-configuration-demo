@@ -1,0 +1,38 @@
+server:
+  port: 8282
+
+kafka-config:
+  producer:
+    props:
+      "[bootstrap.servers]": ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+      "[batch.size]": 16384
+      "[linger.ms]": 0
+      "[buffer.memory]": 33554432
+      "[key.serializer]": org.apache.kafka.common.serialization.StringSerializer
+      "[value.serializer]": org.springframework.kafka.support.serializer.JsonSerializer
+      "[acks]": "1"
+      "[request.timeout.ms]": 30000
+  consumers:
+    "[demo-consumer]":
+      topic: ${DEMO_CONSUMER_TOPIC:kafkaConfiguration.demo}
+      error-topic: ${DEMO_ERROR_TOPIC:kafkaConfiguration.demoError}
+      concurrency: 1
+      retry-count: 2
+      sync-commit: true
+      sync-commit-timeout-second: 5
+      backoffIntervalMillis: 5000 #wait time for retry
+      factory-bean-name: demoKafkaListenerContainerFactory
+      data-class: com.demo.kafkaconfigurationdemo.model.DemoMessage
+      failover-handler-bean-name: defaultConsumerFailoverHandler
+      props:
+        "[bootstrap.servers]": ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+        "[spring.json.trusted.packages]": com.trendyol
+        "[group.id]": ${PENALTY_INVOICE_DATA_COLLECTOR_PACKAGE_CANCELLED_COMBINED_CONSUMER_GROUP:kafkaConfiguration.demoGroup}
+        "[max.poll.records]": 100 #for batch listener
+        "[max.poll.interval.ms]": 300000 #poll time
+        "[session.timeout.ms]": 10000
+        "[heartbeat.interval.ms]": 3000
+        "[enable.auto.commit]": true
+        "[auto.offset.reset]": earliest
+        "[fetch.max.bytes]": 52428800
+        "[fetch.max.wait.ms]": 500
