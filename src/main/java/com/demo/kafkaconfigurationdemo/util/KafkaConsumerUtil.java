@@ -30,7 +30,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 @Component
-public class KafkaConsumerUtil{
+public class KafkaConsumerUtil {
 
     public <T> ConsumerFactory<String, T> createConsumerFactory(Consumer consumer, Class<T> classT) {
         DefaultJackson2JavaTypeMapper typeMapper = new DefaultJackson2JavaTypeMapper();
@@ -72,42 +72,15 @@ public class KafkaConsumerUtil{
         factory.getContainerProperties().setSyncCommits(Optional.ofNullable(consumer.getSyncCommit()).orElse(true));
         factory.getContainerProperties().setSyncCommitTimeout(Duration.ofSeconds(Optional.ofNullable(consumer.getSyncCommitTimeoutSecond()).orElse(5)));
         factory.setConcurrency(Optional.ofNullable(consumer.getConcurrency()).orElse(1));
-
-        if (consumer.getRetryCount() >= 0) {
-            factory.setRetryTemplate(retryTemplate);
-            if (Optional.ofNullable(consumer.getErrorTopic()).isPresent() ||
-                    Optional.ofNullable(consumer.getFailoverHandlerBeanName()).isPresent()) {
-                ErrorHandler errorHandler = new SeekToCurrentErrorHandler(new FixedBackOff(consumer.getBackoffIntervalMillis(),
-                        consumer.getRetryCount() + 1));
-
-                factory.setRecoveryCallback(context -> {
-                    ConsumerRecord record = (ConsumerRecord) context.getAttribute(RetryingMessageListenerAdapter.CONTEXT_RECORD);
-
-                    Optional.ofNullable(consumer.getFailoverHandlerBeanName())
-                            .ifPresent(_any -> failoverProcessCustom(context, consumer, record));
-
-                    Optional.ofNullable(consumer.getErrorTopic())
-                            .ifPresent(_any -> failoverProcessKafka(kafkaOperations, consumer, record));
-
-                    return Optional.empty();
-                });
-
-                factory.setErrorHandler(errorHandler);
-            }
-        }
         factory.setBatchListener(false);
         factory.setAutoStartup(Optional.ofNullable(consumer.getAutoStartup()).orElse(true));
 
+        if (consumer.getRetryCount() >= 0) {
+            factory.setRetryTemplate(retryTemplate);
+            addFailoverProcess(kafkaOperations, consumer, factory);
+        }
+
         return factory;
-    }
-
-    public void failoverProcessKafka(KafkaOperations<String, Object> kafkaOperations, Consumer consumer, ConsumerRecord record) {
-        kafkaOperations.send(consumer.getErrorTopic(), record.key().toString(), record.value());
-    }
-
-    public void failoverProcessCustom(RetryContext context, Consumer consumer, ConsumerRecord record) {
-        FailoverHandler failoverService = SpringContext.context.getBean(consumer.getFailoverHandlerBeanName(), FailoverHandler.class);
-        failoverService.handle(record, Optional.ofNullable(context.getLastThrowable()).flatMap(t -> Optional.ofNullable(t.getCause())).orElse(null));
     }
 
     public Class<?> getDataClass(Consumer consumer) {
@@ -130,5 +103,34 @@ public class KafkaConsumerUtil{
         ConfigurableListableBeanFactory beanFactory = ((ConfigurableApplicationContext) applicationContext).getBeanFactory();
         beanFactory.registerSingleton(consumer.getFactoryBeanName(), singleKafkaListenerContainerFactory);
         return singleKafkaListenerContainerFactory;
+    }
+
+    private <T> void addFailoverProcess(KafkaOperations<String, Object> kafkaOperations, Consumer consumer, ConcurrentKafkaListenerContainerFactory<String, T> factory) {
+        if (Optional.ofNullable(consumer.getErrorTopic()).isPresent() || Optional.ofNullable(consumer.getFailoverHandlerBeanName()).isPresent()) {
+            ErrorHandler errorHandler = new SeekToCurrentErrorHandler(new FixedBackOff(consumer.getBackoffIntervalMillis(),
+                    consumer.getRetryCount() + 1));
+
+            factory.setRecoveryCallback(context -> {
+                ConsumerRecord record = (ConsumerRecord) context.getAttribute(RetryingMessageListenerAdapter.CONTEXT_RECORD);
+                Optional.ofNullable(consumer.getFailoverHandlerBeanName())
+                        .ifPresent(_any -> failoverProcessCustom(context, consumer, record));
+
+                Optional.ofNullable(consumer.getErrorTopic())
+                        .ifPresent(_any -> failoverProcessKafka(kafkaOperations, consumer, record));
+
+                return Optional.empty();
+            });
+
+            factory.setErrorHandler(errorHandler);
+        }
+    }
+
+    private void failoverProcessKafka(KafkaOperations<String, Object> kafkaOperations, Consumer consumer, ConsumerRecord record) {
+        kafkaOperations.send(consumer.getErrorTopic(), record.key().toString(), record.value());
+    }
+
+    private void failoverProcessCustom(RetryContext context, Consumer consumer, ConsumerRecord record) {
+        FailoverHandler failoverService = SpringContext.context.getBean(consumer.getFailoverHandlerBeanName(), FailoverHandler.class);
+        failoverService.handle(record, Optional.ofNullable(context.getLastThrowable()).flatMap(t -> Optional.ofNullable(t.getCause())).orElse(null));
     }
 }
