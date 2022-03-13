@@ -112,12 +112,8 @@ public class KafkaConsumerUtil {
 
             factory.setRecoveryCallback(context -> {
                 ConsumerRecord record = (ConsumerRecord) context.getAttribute(RetryingMessageListenerAdapter.CONTEXT_RECORD);
-                Optional.ofNullable(consumer.getFailoverHandlerBeanName())
-                        .ifPresent(_any -> failoverProcessCustom(context, consumer, record));
-
-                Optional.ofNullable(consumer.getErrorTopic())
-                        .ifPresent(_any -> failoverProcessKafka(kafkaOperations, consumer, record));
-
+                failoverProcessCustom(context, consumer, record);
+                failoverProcessKafka(kafkaOperations, consumer, record);
                 return Optional.empty();
             });
 
@@ -126,11 +122,15 @@ public class KafkaConsumerUtil {
     }
 
     private void failoverProcessKafka(KafkaOperations<String, Object> kafkaOperations, Consumer consumer, ConsumerRecord record) {
-        kafkaOperations.send(consumer.getErrorTopic(), record.key().toString(), record.value());
+        Optional.ofNullable(consumer.getFailoverHandlerBeanName())
+                .ifPresent(_any -> kafkaOperations.send(consumer.getErrorTopic(), record.key().toString(), record.value()));
     }
 
     private void failoverProcessCustom(RetryContext context, Consumer consumer, ConsumerRecord record) {
-        FailoverHandler failoverService = SpringContext.context.getBean(consumer.getFailoverHandlerBeanName(), FailoverHandler.class);
-        failoverService.handle(record, Optional.ofNullable(context.getLastThrowable()).flatMap(t -> Optional.ofNullable(t.getCause())).orElse(null));
+        Optional.ofNullable(consumer.getErrorTopic())
+                .ifPresent(_any -> {
+                    FailoverHandler failoverService = SpringContext.context.getBean(consumer.getFailoverHandlerBeanName(), FailoverHandler.class);
+                    failoverService.handle(record, Optional.ofNullable(context.getLastThrowable()).flatMap(t -> Optional.ofNullable(t.getCause())).orElse(null));
+                });
     }
 }
